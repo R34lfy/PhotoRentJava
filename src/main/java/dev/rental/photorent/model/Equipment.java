@@ -29,6 +29,7 @@ public class Equipment {
         this.condition = condition;
     }
 
+    // геттеры
     public Long getId() {
         return id;
     }
@@ -61,20 +62,30 @@ public class Equipment {
         return status;
     }
 
-    public void setStatus(EquipmentStatus status) {
-        this.status = status;
-    }
-
     public EquipmentCondition getCondition() {
         return condition;
+    }
+
+    // сеттеры
+    public void setStatus(EquipmentStatus status) {
+        this.status = status;
     }
 
     public void setCondition(EquipmentCondition condition) {
         this.condition = condition;
     }
 
+    // проверка на выдачу прямо сейчас (с проверкой на available)
     public boolean isAvailableForRental() {
-        return status == EquipmentStatus.AVAILABLE && condition != EquipmentCondition.NEEDS_REPAIR;
+        return status == EquipmentStatus.AVAILABLE
+                && condition != EquipmentCondition.NEEDS_REPAIR
+                && condition != EquipmentCondition.DECOMMISSIONED;
+    }
+
+    // проверка в целом на пригодность техники для выдачи
+    public boolean isUsableForRental() {
+        return condition != EquipmentCondition.NEEDS_REPAIR
+                && condition != EquipmentCondition.DECOMMISSIONED;
     }
 
     @Override
