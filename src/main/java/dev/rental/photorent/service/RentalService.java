@@ -1,11 +1,13 @@
 package dev.rental.photorent.service;
 
-import dev.rental.photorent.model.CustomerUser;
 import dev.rental.photorent.model.Equipment;
 import dev.rental.photorent.model.EquipmentStatus;
+import dev.rental.photorent.repository.EquipmentRepository;
+
+import dev.rental.photorent.model.CustomerUser;
+
 import dev.rental.photorent.model.Rental;
 import dev.rental.photorent.model.RentalStatus;
-import dev.rental.photorent.repository.EquipmentRepository;
 import dev.rental.photorent.repository.RentalRepository;
 
 import java.time.LocalDate;
@@ -27,7 +29,7 @@ public class RentalService {
         if (startDate.isAfter(endDate)) {
             throw new IllegalArgumentException("Start date must not be after end date");
         }
-        if (!equipment.isAvailableForRental()) {
+        if (!equipment.isUsableForRental()) {
             throw new IllegalStateException("Equipment is not available for rental: " + equipment.getName());
         }
 
@@ -60,6 +62,31 @@ public class RentalService {
         }
         rental.setStatus(RentalStatus.RETURNED);
         rental.getEquipment().setStatus(EquipmentStatus.AVAILABLE);
+    }
+
+    public synchronized void extendRental(Long rentalId, LocalDate newEndDate) {
+        Rental rental = getRentalOrThrow(rentalId);
+
+        if (rental.getStatus() != RentalStatus.ACTIVE) {
+            throw new IllegalStateException("Only ACTIVE rentals can be extended, current status: " + rental.getStatus());
+        }
+        if (!newEndDate.isAfter(rental.getEndDate())) {
+            throw new IllegalArgumentException("New end date must be after the current end date");
+        }
+
+        List<Rental> conflictingRentals = rentalRepository.findByEquipmentId(rental.getEquipment().getId()).stream()
+                .filter(other -> !other.getId().equals(rental.getId()))
+                .filter(other -> other.getStatus() == RentalStatus.BOOKED || other.getStatus() == RentalStatus.ACTIVE)
+                .filter(other -> other.overlapsWith(rental.getEndDate().plusDays(1), newEndDate))
+                .toList();
+
+        if (!conflictingRentals.isEmpty()) {
+            throw new IllegalStateException(
+                    "Cannot extend rental: equipment is already booked by another customer starting "
+                            + conflictingRentals.get(0).getStartDate());
+        }
+
+        rental.setEndDate(newEndDate);
     }
 
     public List<Rental> getRentalsByCustomer(Long customerId) {

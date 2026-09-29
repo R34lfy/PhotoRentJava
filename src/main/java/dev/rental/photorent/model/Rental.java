@@ -9,7 +9,7 @@ public class Rental {
     private final Equipment equipment;
     private final CustomerUser customer;
     private final LocalDate startDate;
-    private final LocalDate endDate;
+    private LocalDate endDate;
     private RentalStatus status;
 
     public Rental(Long id, Equipment equipment, CustomerUser customer,
@@ -22,6 +22,7 @@ public class Rental {
         this.status = status;
     }
 
+    // геттеры
     public Long getId() {
         return id;
     }
@@ -46,8 +47,13 @@ public class Rental {
         return status;
     }
 
+    // сеттеры
     public void setStatus(RentalStatus status) {
         this.status = status;
+    }
+
+    public void setEndDate(LocalDate endDate) {
+        this.endDate = endDate;
     }
 
     public boolean overlapsWith(LocalDate otherStart, LocalDate otherEnd) {
