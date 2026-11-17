@@ -1,59 +1,61 @@
 package dev.rental.photorent.model;
 
-import java.time.LocalDate;
-import java.util.Objects;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
+import java.time.LocalDate;
+
+@Entity
+@Table(name = "rental")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Rental {
 
-    private final Long id;
-    private final Equipment equipment;
-    private final CustomerUser customer;
-    private final LocalDate startDate;
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "equipment_id", nullable = false, updatable = false)
+    private Equipment equipment;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "customer_id", nullable = false, updatable = false)
+    private CustomerUser customer;
+
+    @Column(name = "start_date", nullable = false, updatable = false)
+    private LocalDate startDate;
+
+    // не final (аренду можно продлить)
+    @Setter
+    @Column(name = "end_date", nullable = false)
     private LocalDate endDate;
+
+    @Setter
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
     private RentalStatus status;
 
-    public Rental(Long id, Equipment equipment, CustomerUser customer,
+    public Rental(Equipment equipment, CustomerUser customer,
                   LocalDate startDate, LocalDate endDate, RentalStatus status) {
-        this.id = id;
         this.equipment = equipment;
         this.customer = customer;
         this.startDate = startDate;
         this.endDate = endDate;
         this.status = status;
-    }
-
-    // геттеры
-    public Long getId() {
-        return id;
-    }
-
-    public Equipment getEquipment() {
-        return equipment;
-    }
-
-    public CustomerUser getCustomer() {
-        return customer;
-    }
-
-    public LocalDate getStartDate() {
-        return startDate;
-    }
-
-    public LocalDate getEndDate() {
-        return endDate;
-    }
-
-    public RentalStatus getStatus() {
-        return status;
-    }
-
-    // сеттеры
-    public void setStatus(RentalStatus status) {
-        this.status = status;
-    }
-
-    public void setEndDate(LocalDate endDate) {
-        this.endDate = endDate;
     }
 
     public boolean overlapsWith(LocalDate otherStart, LocalDate otherEnd) {
@@ -66,26 +68,17 @@ public class Rental {
 
     @Override
     public boolean equals(Object other) {
-        if (this == other) {
-            return true;
-        }
-        if (other == null || getClass() != other.getClass()) {
-            return false;
-        }
-        Rental rental = (Rental) other;
-        return Objects.equals(id, rental.id);
+        return other instanceof Rental rental && id != null && id.equals(rental.getId());
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id);
+        return Rental.class.hashCode();
     }
 
     @Override
     public String toString() {
-        return "Rental [id: " + id + ", equipment: " + equipment.getName()
-                + ", customer: " + customer.getUsername() + ", startDate: " + startDate
+        return "Rental[id: " + id + ", startDate: " + startDate
                 + ", endDate: " + endDate + ", status: " + status + "]";
     }
 }
-
