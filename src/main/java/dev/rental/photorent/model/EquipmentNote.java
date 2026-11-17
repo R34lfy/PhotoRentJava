@@ -1,65 +1,63 @@
 package dev.rental.photorent.model;
 
-import java.time.LocalDateTime;
-import java.util.Objects;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "equipment_note")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class EquipmentNote {
 
-    private final Long id;
-    private final Equipment equipment;
-    private final User author;
-    private final String text;
-    private final LocalDateTime createdAt;
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
 
-    public EquipmentNote(Long id, Equipment equipment, User author, String text, LocalDateTime createdAt) {
-        this.id = id;
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "equipment_id", nullable = false, updatable = false)
+    private Equipment equipment;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "author_id", nullable = false, updatable = false)
+    private User author;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt;
+
+    @Column(name = "note_text", nullable = false, updatable = false)
+    private String text;
+
+    public EquipmentNote(Equipment equipment, User author, String text) {
         this.equipment = equipment;
         this.author = author;
         this.text = text;
-        this.createdAt = createdAt;
-    }
-
-    public Long getId() {
-        return id;
-    }
-
-    public Equipment getEquipment() {
-        return equipment;
-    }
-
-    public User getAuthor() {
-        return author;
-    }
-
-    public String getText() {
-        return text;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
+        this.createdAt = LocalDateTime.now();
     }
 
     @Override
     public boolean equals(Object other) {
-        if (this == other) {
-            return true;
-        }
-        if (other == null || getClass() != other.getClass()) {
-            return false;
-        }
-        EquipmentNote note = (EquipmentNote) other;
-        return Objects.equals(id, note.id);
+        return other instanceof EquipmentNote note && id != null && id.equals(note.getId());
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id);
+        return EquipmentNote.class.hashCode();
     }
 
     @Override
     public String toString() {
-        return "EquipmentNote{id=" + id + ", equipment=" + equipment.getSerialNumber()
-                + ", author=" + author.getUsername() + ", createdAt=" + createdAt + "}";
+        return "EquipmentNote[id: " + id + ", createdAt: " + createdAt + "]";
     }
 }
-
