@@ -1,115 +1,80 @@
 package dev.rental.photorent.model;
 
-import java.math.BigDecimal;
-import java.util.Objects;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
+@Entity
+@Table(name = "equipment")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Equipment {
 
-    private final Long id;
-    private final String name;
-    private final String brand;
-    private final String description;
-    private final EquipmentCategory category;
-    private final String serialNumber;
-    private final BigDecimal dailyRate;
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "model_id", nullable = false, updatable = false)
+    private EquipmentModel model;
+
+    @Column(name = "serial_number", nullable = false, length = 15, updatable = false)
+    private String serialNumber;
+
+    @Setter
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
     private EquipmentStatus status;
+
+    @Setter
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
     private EquipmentCondition condition;
 
-    public Equipment(Long id, String name, String brand, String description,
-                     EquipmentCategory category, String serialNumber, BigDecimal dailyRate,
+    public Equipment(EquipmentModel model, String serialNumber,
                      EquipmentStatus status, EquipmentCondition condition) {
-        this.id = id;
-        this.name = name;
-        this.brand = brand;
-        this.description = description;
-        this.category = category;
+        this.model = model;
         this.serialNumber = serialNumber;
-        this.dailyRate = dailyRate;
         this.status = status;
         this.condition = condition;
     }
 
-    // геттеры
-    public Long getId() {
-        return id;
-    }
-
-    public String getName() {
-        return name;
-    }
-
-    public String getBrand() {
-        return brand;
-    }
-
-    public String getDescription() {
-        return description;
-    }
-
-    public EquipmentCategory getCategory() {
-        return category;
-    }
-
-    public String getSerialNumber() {
-        return serialNumber;
-    }
-
-    public BigDecimal getDailyRate() {
-        return dailyRate;
-    }
-
-    public EquipmentStatus getStatus() {
-        return status;
-    }
-
-    public EquipmentCondition getCondition() {
-        return condition;
-    }
-
-    // сеттеры
-    public void setStatus(EquipmentStatus status) {
-        this.status = status;
-    }
-
-    public void setCondition(EquipmentCondition condition) {
-        this.condition = condition;
-    }
-
-    // проверка на выдачу прямо сейчас (с проверкой на available)
     public boolean isAvailableForRental() {
         return status == EquipmentStatus.AVAILABLE
                 && condition != EquipmentCondition.NEEDS_REPAIR
                 && condition != EquipmentCondition.DECOMMISSIONED;
     }
 
-    // проверка в целом на пригодность техники для выдачи
-    public boolean isUsableForRental() {
+    public boolean isUsable() {
         return condition != EquipmentCondition.NEEDS_REPAIR
                 && condition != EquipmentCondition.DECOMMISSIONED;
     }
 
     @Override
     public boolean equals(Object other) {
-        if (this == other) {
-            return true;
-        }
-        if (other == null || getClass() != other.getClass()) {
-            return false;
-        }
-        Equipment equipment = (Equipment) other;
-        return Objects.equals(id, equipment.id);
+        return other instanceof Equipment equipment && id != null && id.equals(equipment.getId());
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id);
+        return Equipment.class.hashCode();
     }
 
     @Override
     public String toString() {
-        return "Equipment [id: " + id + ", name: '" + name + "', brand: '" + brand
-                + "', category: " + category + ", status: " + status
-                + ", condition: " + condition + ", dailyRate: " + dailyRate + "]";
+        return "Equipment[id: " + id + ", serialNumber: '" + serialNumber
+                + "', status: " + status + ", condition: " + condition + "]";
     }
 }
-
