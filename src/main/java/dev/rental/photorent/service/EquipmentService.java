@@ -6,12 +6,14 @@ import dev.rental.photorent.model.EquipmentCondition;
 import dev.rental.photorent.model.EquipmentModel;
 import dev.rental.photorent.model.EquipmentNote;
 import dev.rental.photorent.model.EquipmentStatus;
+import dev.rental.photorent.model.RentalStatus;
 import dev.rental.photorent.model.User;
 import dev.rental.photorent.model.UserRole;
 import dev.rental.photorent.repository.EquipmentCategoryRepository;
 import dev.rental.photorent.repository.EquipmentModelRepository;
 import dev.rental.photorent.repository.EquipmentNoteRepository;
 import dev.rental.photorent.repository.EquipmentRepository;
+import dev.rental.photorent.repository.RentalRepository;
 import dev.rental.photorent.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -34,6 +36,7 @@ public class EquipmentService {
     private final EquipmentCategoryRepository categoryRepository;
     private final EquipmentNoteRepository noteRepository;
     private final UserRepository userRepository;
+    private final RentalRepository rentalRepository;
 
     @Transactional
     public EquipmentModel createModel(String categoryPrefix, String brand, String name,
@@ -111,7 +114,9 @@ public class EquipmentService {
         if (reason == null || reason.isBlank()) {
             throw new IllegalArgumentException("A reason must be provided when changing equipment condition");
         }
-        Equipment equipment = findEquipment(equipmentId);
+        // блокируем строку техники (параллельная бронь и списание идут по очереди)
+        Equipment equipment = equipmentRepository.findByIdForUpdate(equipmentId)
+                .orElseThrow(() -> new NoSuchElementException("Equipment not found: " + equipmentId));
         User staff = findStaff(staffId);
 
         EquipmentCondition previous = equipment.getCondition();
@@ -121,8 +126,14 @@ public class EquipmentService {
         if (previous == EquipmentCondition.DECOMMISSIONED) {
             throw new IllegalStateException("Decommissioned equipment cannot be restored");
         }
-        if (newCondition == EquipmentCondition.DECOMMISSIONED && staff.getRole() != UserRole.ADMIN) {
-            throw new IllegalStateException("Only an administrator can decommission equipment");
+        if (newCondition == EquipmentCondition.DECOMMISSIONED) {
+            if (staff.getRole() != UserRole.ADMIN) {
+                throw new IllegalStateException("Only an administrator can decommission equipment");
+            }
+            if (rentalRepository.existsByEquipmentIdAndStatusIn(equipmentId, RentalStatus.OPEN_STATUSES)) {
+                throw new IllegalStateException(
+                        "Cannot decommission equipment with unfinished rentals: " + equipment.getSerialNumber());
+            }
         }
 
         equipment.setCondition(newCondition);
@@ -134,7 +145,6 @@ public class EquipmentService {
                 previous, newCondition, reason.trim());
         noteRepository.save(new EquipmentNote(equipment, staff, text));
     }
-
     @Transactional
     public EquipmentNote addNote(Long equipmentId, Long authorId, String text) {
         if (text == null || text.isBlank()) {

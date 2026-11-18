@@ -18,6 +18,8 @@ public interface RentalRepository extends JpaRepository<Rental, Long> {
 
     List<Rental> findByStatus(RentalStatus status);
 
+    boolean existsByEquipmentIdAndStatusIn(Long equipmentId, Collection<RentalStatus> statuses);
+
     // пересечение периодов, границы включительно (как Rental.overlapsWith)
     @Query("""
             select r from Rental r

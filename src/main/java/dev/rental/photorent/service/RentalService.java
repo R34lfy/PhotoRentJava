@@ -25,10 +25,6 @@ import java.util.Optional;
 
 public class RentalService {
 
-    // те же статусы, что в ограничении EXCLUDE в schema.sql
-    private static final List<RentalStatus> BLOCKING_STATUSES =
-            List.of(RentalStatus.BOOKED, RentalStatus.ACTIVE, RentalStatus.OVERDUE);
-
     private final RentalRepository rentalRepository;
     private final EquipmentRepository equipmentRepository;
     private final UserRepository userRepository;
@@ -53,7 +49,7 @@ public class RentalService {
         if (!equipment.isUsable()) {
             throw new IllegalStateException("Equipment is not available for rental: " + equipment.getSerialNumber());
         }
-        if (!rentalRepository.findOverlapping(equipmentId, BLOCKING_STATUSES, startDate, endDate).isEmpty()) {
+        if (!rentalRepository.findOverlapping(equipmentId, RentalStatus.OPEN_STATUSES, startDate, endDate).isEmpty()) {
             throw new IllegalStateException("Equipment is already booked for the selected dates");
         }
 
@@ -103,7 +99,7 @@ public class RentalService {
 
         // у кого бронь раньше, тот и в приоритете (смотрим период со следующего дня после текущего конца)
         List<Rental> conflicts = rentalRepository.findOverlappingExcluding(
-                rental.getEquipment().getId(), rental.getId(), BLOCKING_STATUSES,
+                rental.getEquipment().getId(), rental.getId(), RentalStatus.OPEN_STATUSES,
                 rental.getEndDate().plusDays(1), newEndDate);
         if (!conflicts.isEmpty()) {
             LocalDate firstConflict = conflicts.stream()
