@@ -1,23 +1,32 @@
 package dev.rental.photorent.repository;
 
 import dev.rental.photorent.model.Equipment;
-import dev.rental.photorent.model.EquipmentCategory;
+import dev.rental.photorent.model.EquipmentCondition;
+import dev.rental.photorent.model.EquipmentStatus;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
 
-public interface EquipmentRepository {
+public interface EquipmentRepository extends JpaRepository<Equipment, Long> {
 
-    Equipment add(Equipment equipment);
+    List<Equipment> findByModelCategorySerialPrefix(String serialPrefix);
 
-    Optional<Equipment> findById(Long id);
+    List<Equipment> findByStatus(EquipmentStatus status);
 
-    List<Equipment> findByCategory(EquipmentCategory category);
+    List<Equipment> findByCondition(EquipmentCondition condition);
 
-    List<Equipment> findByNameContaining(String namePart);
+    List<Equipment> findByModelNameContainingIgnoreCase(String namePart);
 
-    List<Equipment> findAll();
+    List<Equipment> findByModelNameContainingIgnoreCaseAndStatus(String namePart, EquipmentStatus status);
 
-    boolean deleteById(Long id);
+    // блокировка нужна, чтобы два бронирования одной техники шли по очереди
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select e from Equipment e where e.id = :id")
+    Optional<Equipment> findByIdForUpdate(@Param("id") Long id);
 }
 
