@@ -12,6 +12,7 @@ import lombok.NoArgsConstructor;
 @Table(name = "equipment_category")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
+
 public class EquipmentCategory {
 
     @Id
@@ -21,17 +22,12 @@ public class EquipmentCategory {
     @Column(nullable = false, length = 30)
     private String name;
 
+    // меняется только запросом incrementSerialCounter в репозитории
     @Column(name = "last_serial_number", nullable = false)
     private int lastSerialNumber;
 
     public EquipmentCategory(String serialPrefix, String name) {
         this.serialPrefix = serialPrefix;
         this.name = name;
-    }
-
-    // вызывать только внутри транзакции (строка категории при этом блокируется)
-    public String nextSerialNumber() {
-        lastSerialNumber++;
-        return String.format("%s-%05d", serialPrefix, lastSerialNumber);
     }
 }
