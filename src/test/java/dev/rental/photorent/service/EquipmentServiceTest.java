@@ -1,126 +1,289 @@
 package dev.rental.photorent.service;
 
-import dev.rental.photorent.model.Equipment;
-import dev.rental.photorent.model.EquipmentCategory;
-import dev.rental.photorent.model.EquipmentCondition;
-import dev.rental.photorent.model.EquipmentStatus;
-import dev.rental.photorent.model.EquipmentNote;
-import dev.rental.photorent.repository.EquipmentRepository;
-import dev.rental.photorent.repository.EquipmentNoteRepository;
-import dev.rental.photorent.repository.InMemoryEquipmentRepository;
-import dev.rental.photorent.repository.InMemoryEquipmentNoteRepository;
-
-import dev.rental.photorent.model.User;
+import dev.rental.photorent.TestData;
 import dev.rental.photorent.model.AdminUser;
-import dev.rental.photorent.model.ManagerUser;
 import dev.rental.photorent.model.CustomerUser;
-
-import org.junit.jupiter.api.BeforeEach;
+import dev.rental.photorent.model.Equipment;
+import dev.rental.photorent.model.EquipmentCondition;
+import dev.rental.photorent.model.EquipmentModel;
+import dev.rental.photorent.model.EquipmentNote;
+import dev.rental.photorent.model.EquipmentStatus;
+import dev.rental.photorent.model.ManagerUser;
+import dev.rental.photorent.model.RentalStatus;
+import dev.rental.photorent.model.User;
+import dev.rental.photorent.repository.EquipmentCategoryRepository;
+import dev.rental.photorent.repository.EquipmentModelRepository;
+import dev.rental.photorent.repository.EquipmentNoteRepository;
+import dev.rental.photorent.repository.EquipmentRepository;
+import dev.rental.photorent.repository.RentalRepository;
+import dev.rental.photorent.repository.UserRepository;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+@SpringBootTest(classes = EquipmentService.class)
 class EquipmentServiceTest {
 
+    @Autowired
     private EquipmentService equipmentService;
-    private AdminUser admin;
-    private ManagerUser manager;
 
-    @BeforeEach
-    void setUp() {
-        EquipmentRepository equipmentRepository = new InMemoryEquipmentRepository();
-        EquipmentNoteRepository noteRepository = new InMemoryEquipmentNoteRepository();
-        equipmentService = new EquipmentService(equipmentRepository, noteRepository);
-        admin = new AdminUser(1L, "admin1", "admin1@example.com");
-        manager = new ManagerUser(2L, "manager1", "manager1@example.com");
-    }
+    @MockitoBean
+    private EquipmentRepository equipmentRepository;
+    @MockitoBean
+    private EquipmentModelRepository modelRepository;
+    @MockitoBean
+    private EquipmentCategoryRepository categoryRepository;
+    @MockitoBean
+    private EquipmentNoteRepository noteRepository;
+    @MockitoBean
+    private UserRepository userRepository;
+    @MockitoBean
+    private RentalRepository rentalRepository;
+
+    private final AdminUser admin = TestData.admin(1L);
+    private final ManagerUser manager = TestData.manager(2L);
+
+    // подбор лучшего экземпляра
 
     @Test
     void shouldFindBestAvailableEquipmentAmongDuplicates() {
-        equipmentService.addEquipment(createCamera(1L, "Sony A7 IV", EquipmentCondition.WORN));
-        equipmentService.addEquipment(createCamera(2L, "Sony A7 IV", EquipmentCondition.NEW));
-        equipmentService.addEquipment(createCamera(3L, "Sony A7 IV", EquipmentCondition.GOOD));
+        Equipment worn = TestData.equipment(1L, EquipmentStatus.AVAILABLE, EquipmentCondition.WORN);
+        Equipment brandNew = TestData.equipment(2L, EquipmentStatus.AVAILABLE, EquipmentCondition.NEW);
+        Equipment good = TestData.equipment(3L, EquipmentStatus.AVAILABLE, EquipmentCondition.GOOD);
+        when(equipmentRepository.findByModelNameContainingIgnoreCaseAndStatus("A7", EquipmentStatus.AVAILABLE))
+                .thenReturn(List.of(worn, brandNew, good));
 
-        Optional<Equipment> best = equipmentService.findBestAvailableByName("Sony A7 IV");
+        Optional<Equipment> best = equipmentService.findBestAvailableByName("A7");
 
-        assertThat(best).isPresent();
-        assertThat(best.get().getId()).isEqualTo(2L);
-        assertThat(best.get().getCondition()).isEqualTo(EquipmentCondition.NEW);
+        assertThat(best).contains(brandNew);
     }
 
     @Test
-    void shouldNotSuggestEquipmentThatNeedsRepair() {
-        Equipment brokenCamera = createCamera(1L, "Sony A7 IV", EquipmentCondition.NEEDS_REPAIR);
-        equipmentService.addEquipment(brokenCamera);
+    void shouldSkipEquipmentThatNeedsRepairWhenChoosingBest() {
+        Equipment broken = TestData.equipment(1L, EquipmentStatus.AVAILABLE, EquipmentCondition.NEEDS_REPAIR);
+        Equipment worn = TestData.equipment(2L, EquipmentStatus.AVAILABLE, EquipmentCondition.WORN);
+        when(equipmentRepository.findByModelNameContainingIgnoreCaseAndStatus("A7", EquipmentStatus.AVAILABLE))
+                .thenReturn(List.of(broken, worn));
 
-        Optional<Equipment> best = equipmentService.findBestAvailableByName("Sony A7 IV");
-
-        assertThat(best).isEmpty();
+        assertThat(equipmentService.findBestAvailableByName("A7")).contains(worn);
     }
 
     @Test
-    void shouldUpdateConditionAndCreateAuditNote() {
-        Equipment camera = createCamera(1L, "Sony A7 IV", EquipmentCondition.WORN);
-        equipmentService.addEquipment(camera);
+    void shouldReturnEmptyWhenNothingIsAvailable() {
+        assertThat(equipmentService.findBestAvailableByName("A7")).isEmpty();
+    }
 
-        equipmentService.updateCondition(1L, EquipmentCondition.GOOD, manager, "Customer cleaned the battery latch");
+    // модели и экземпляры
+
+    @Test
+    void shouldCreateModelWithTrimmedFields() {
+        when(categoryRepository.findById("CAM")).thenReturn(Optional.of(TestData.cameraCategory()));
+        when(modelRepository.save(any(EquipmentModel.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        EquipmentModel model = equipmentService.createModel(
+                "CAM", " Sony ", " A7 IV ", "Full-frame", BigDecimal.valueOf(50));
+
+        assertThat(model.getBrand()).isEqualTo("Sony");
+        assertThat(model.getName()).isEqualTo("A7 IV");
+    }
+
+    @Test
+    void shouldRejectDuplicateModel() {
+        when(categoryRepository.findById("CAM")).thenReturn(Optional.of(TestData.cameraCategory()));
+        when(modelRepository.existsByBrandIgnoreCaseAndNameIgnoreCase("Sony", "A7 IV")).thenReturn(true);
+
+        assertThatThrownBy(() -> equipmentService.createModel(
+                "CAM", "Sony", "A7 IV", "Full-frame", BigDecimal.valueOf(50)))
+                .isInstanceOf(IllegalStateException.class);
+        verify(modelRepository, never()).save(any(EquipmentModel.class));
+    }
+
+    @Test
+    void shouldRejectNegativeDailyRate() {
+        assertThatThrownBy(() -> equipmentService.createModel(
+                "CAM", "Sony", "A7 IV", "Full-frame", BigDecimal.valueOf(-1)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void shouldGenerateSerialNumberFromCategoryCounter() {
+        when(modelRepository.findById(1L)).thenReturn(Optional.of(TestData.model(1L, "Sony", "A7 IV")));
+        when(categoryRepository.findSerialCounter("CAM")).thenReturn(Optional.of(7));
+        when(equipmentRepository.save(any(Equipment.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Equipment created = equipmentService.addEquipment(1L, EquipmentCondition.NEW);
+
+        assertThat(created.getSerialNumber()).isEqualTo("CAM-00007");
+        assertThat(created.getStatus()).isEqualTo(EquipmentStatus.AVAILABLE);
+        verify(categoryRepository).incrementSerialCounter("CAM");
+    }
+
+    @Test
+    void shouldKeepGrowingSerialNumberPastFiveDigits() {
+        when(modelRepository.findById(1L)).thenReturn(Optional.of(TestData.model(1L, "Sony", "A7 IV")));
+        when(categoryRepository.findSerialCounter("CAM")).thenReturn(Optional.of(100000));
+        when(equipmentRepository.save(any(Equipment.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Equipment created = equipmentService.addEquipment(1L, EquipmentCondition.NEW);
+
+        assertThat(created.getSerialNumber()).isEqualTo("CAM-100000");
+    }
+
+    @Test
+    void shouldRejectAddingDecommissionedEquipment() {
+        assertThatThrownBy(() -> equipmentService.addEquipment(1L, EquipmentCondition.DECOMMISSIONED))
+                .isInstanceOf(IllegalArgumentException.class);
+        verify(equipmentRepository, never()).save(any(Equipment.class));
+    }
+
+    @Test
+    void shouldRejectAddingEquipmentOfUnknownModel() {
+        assertThatThrownBy(() -> equipmentService.addEquipment(99L, EquipmentCondition.NEW))
+                .isInstanceOf(NoSuchElementException.class);
+    }
+
+    // изменение состояния
+
+    @Test
+    void shouldUpdateConditionAndWriteAuditNote() {
+        Equipment camera = storedEquipment(EquipmentStatus.AVAILABLE, EquipmentCondition.WORN);
+        staffLogsIn(manager);
+
+        equipmentService.updateCondition(1L, EquipmentCondition.GOOD, 2L, "Customer cleaned the battery latch");
 
         assertThat(camera.getCondition()).isEqualTo(EquipmentCondition.GOOD);
-        List<EquipmentNote> notes = equipmentService.getNotesFor(1L);
-        assertThat(notes).hasSize(1);
-        assertThat(notes.get(0).getText()).contains("WORN", "GOOD", "Customer cleaned the battery latch");
+        ArgumentCaptor<EquipmentNote> captor = ArgumentCaptor.forClass(EquipmentNote.class);
+        verify(noteRepository).save(captor.capture());
+        assertThat(captor.getValue().getText()).contains("WORN", "GOOD", "Customer cleaned the battery latch");
+        assertThat(captor.getValue().getAuthor()).isEqualTo(manager);
     }
 
     @Test
     void shouldRejectConditionChangeWithoutReason() {
-        Equipment camera = createCamera(1L, "Sony A7 IV", EquipmentCondition.WORN);
-        equipmentService.addEquipment(camera);
+        Equipment camera = storedEquipment(EquipmentStatus.AVAILABLE, EquipmentCondition.WORN);
+        staffLogsIn(manager);
 
-        assertThatThrownBy(() -> equipmentService.updateCondition(1L, EquipmentCondition.GOOD, manager, ""))
+        assertThatThrownBy(() -> equipmentService.updateCondition(1L, EquipmentCondition.GOOD, 2L, " "))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(camera.getCondition()).isEqualTo(EquipmentCondition.WORN);
+        verify(noteRepository, never()).save(any(EquipmentNote.class));
+    }
+
+    @Test
+    void shouldRejectChangeToTheSameCondition() {
+        storedEquipment(EquipmentStatus.AVAILABLE, EquipmentCondition.WORN);
+        staffLogsIn(manager);
+
+        assertThatThrownBy(() -> equipmentService.updateCondition(1L, EquipmentCondition.WORN, 2L, "No change"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void shouldRejectDecommissioningByNonAdmin() {
-        Equipment camera = createCamera(1L, "Sony A7 IV", EquipmentCondition.NEEDS_REPAIR);
-        equipmentService.addEquipment(camera);
+        Equipment camera = storedEquipment(EquipmentStatus.AVAILABLE, EquipmentCondition.NEEDS_REPAIR);
+        staffLogsIn(manager);
 
         assertThatThrownBy(() -> equipmentService.updateCondition(
-                1L, EquipmentCondition.DECOMMISSIONED, manager, "Motor completely burned out"))
-                .isInstanceOf(IllegalStateException.class);
+                1L, EquipmentCondition.DECOMMISSIONED, 2L, "Motor burned out"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("administrator");
+        assertThat(camera.getCondition()).isEqualTo(EquipmentCondition.NEEDS_REPAIR);
     }
 
     @Test
-    void shouldAllowDecommissioningByAdmin() {
-        Equipment camera = createCamera(1L, "Sony A7 IV", EquipmentCondition.NEEDS_REPAIR);
-        equipmentService.addEquipment(camera);
+    void shouldAllowDecommissioningByAdminWhenNoUnfinishedRentals() {
+        Equipment camera = storedEquipment(EquipmentStatus.AVAILABLE, EquipmentCondition.NEEDS_REPAIR);
+        staffLogsIn(admin);
 
-        equipmentService.updateCondition(1L, EquipmentCondition.DECOMMISSIONED, admin, "Motor completely burned out");
+        equipmentService.updateCondition(1L, EquipmentCondition.DECOMMISSIONED, 1L, "Motor burned out");
 
         assertThat(camera.getCondition()).isEqualTo(EquipmentCondition.DECOMMISSIONED);
         assertThat(camera.getStatus()).isEqualTo(EquipmentStatus.RETIRED);
     }
 
     @Test
-    void shouldGenerateSequentialSerialNumbersPerCategory() {
-        String first = equipmentService.generateSerialNumber(EquipmentCategory.CAMERA);
-        String second = equipmentService.generateSerialNumber(EquipmentCategory.CAMERA);
-        String firstLens = equipmentService.generateSerialNumber(EquipmentCategory.LENS);
+    void shouldRejectDecommissioningWhenEquipmentHasUnfinishedRentals() {
+        Equipment camera = storedEquipment(EquipmentStatus.AVAILABLE, EquipmentCondition.NEEDS_REPAIR);
+        staffLogsIn(admin);
+        when(rentalRepository.existsByEquipmentIdAndStatusIn(1L, RentalStatus.OPEN_STATUSES)).thenReturn(true);
 
-        assertThat(first).isEqualTo("CAM-00001");
-        assertThat(second).isEqualTo("CAM-00002");
-        assertThat(firstLens).isEqualTo("LEN-00001");
+        assertThatThrownBy(() -> equipmentService.updateCondition(
+                1L, EquipmentCondition.DECOMMISSIONED, 1L, "Motor burned out"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("unfinished rentals");
+        assertThat(camera.getStatus()).isEqualTo(EquipmentStatus.AVAILABLE);
+        verify(noteRepository, never()).save(any(EquipmentNote.class));
     }
 
-    private Equipment createCamera(Long id, String name, EquipmentCondition condition) {
-        return new Equipment(id, name, "Sony", "Full-frame mirrorless",
-                EquipmentCategory.CAMERA, "CAM-" + id, BigDecimal.valueOf(50),
-                EquipmentStatus.AVAILABLE, condition);
+    @Test
+    void shouldNotRestoreDecommissionedEquipment() {
+        storedEquipment(EquipmentStatus.RETIRED, EquipmentCondition.DECOMMISSIONED);
+        staffLogsIn(admin);
+
+        assertThatThrownBy(() -> equipmentService.updateCondition(1L, EquipmentCondition.GOOD, 1L, "Mistake"))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void shouldRejectCustomerAsAuthorOfConditionChange() {
+        storedEquipment(EquipmentStatus.AVAILABLE, EquipmentCondition.WORN);
+        CustomerUser customer = TestData.customer(3L);
+        staffLogsIn(customer);
+
+        assertThatThrownBy(() -> equipmentService.updateCondition(1L, EquipmentCondition.GOOD, 3L, "I fixed it"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("staff");
+    }
+
+    // заметки
+
+    @Test
+    void shouldSaveTrimmedNote() {
+        storedEquipment(EquipmentStatus.AVAILABLE, EquipmentCondition.GOOD);
+        staffLogsIn(manager);
+        when(noteRepository.save(any(EquipmentNote.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        EquipmentNote note = equipmentService.addNote(1L, 2L, "  Scratch on the lens mount ");
+
+        assertThat(note.getText()).isEqualTo("Scratch on the lens mount");
+    }
+
+    @Test
+    void shouldRejectBlankNote() {
+        assertThatThrownBy(() -> equipmentService.addNote(1L, 2L, "  "))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    // удаление
+
+    @Test
+    void shouldNotRemoveMissingEquipment() {
+        assertThat(equipmentService.removeById(999L)).isFalse();
+        verify(equipmentRepository, never()).deleteById(any());
+    }
+
+    private Equipment storedEquipment(EquipmentStatus status, EquipmentCondition condition) {
+        Equipment equipment = TestData.equipment(1L, status, condition);
+        when(equipmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(equipment));
+        when(equipmentRepository.findById(1L)).thenReturn(Optional.of(equipment));
+        return equipment;
+    }
+
+    private void staffLogsIn(User staff) {
+        when(userRepository.findById(staff.getId())).thenReturn(Optional.of(staff));
     }
 }
-
