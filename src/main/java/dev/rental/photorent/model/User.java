@@ -15,6 +15,7 @@ import jakarta.persistence.Table;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 @Entity
 @Table(name = "users")
@@ -29,6 +30,7 @@ public abstract class User {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Setter
     @Column(nullable = false, length = 30)
     private String username;
 
@@ -36,10 +38,11 @@ public abstract class User {
     @Column(name = "password_hash", nullable = false)
     private String passwordHash;
 
+    @Setter
     @Column(nullable = false)
     private String email;
 
-    // та же колонка, что и дискриминатор: только для чтения
+    // та же колонка, что и дискриминатор (только для чтения)
     @Enumerated(EnumType.STRING)
     @Column(name = "role", insertable = false, updatable = false)
     private UserRole role;
