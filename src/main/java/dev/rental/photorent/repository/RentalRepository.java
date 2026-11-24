@@ -2,7 +2,10 @@ package dev.rental.photorent.repository;
 
 import dev.rental.photorent.model.Rental;
 import dev.rental.photorent.model.RentalStatus;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -10,11 +13,12 @@ import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
 
-public interface RentalRepository extends JpaRepository<Rental, Long> {
+public interface RentalRepository extends JpaRepository<Rental, Long>, JpaSpecificationExecutor<Rental> {
 
-    List<Rental> findByCustomerId(Long customerId);
-
-    List<Rental> findByEquipmentId(Long equipmentId);
+    // техника и клиент подгружаются одним запросом, иначе DTO дочитывал бы их по одной
+    @Override
+    @EntityGraph(attributePaths = {"equipment", "customer"})
+    List<Rental> findAll(Specification<Rental> spec);
 
     List<Rental> findByStatus(RentalStatus status);
 
