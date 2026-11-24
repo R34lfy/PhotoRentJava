@@ -14,6 +14,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -116,5 +117,55 @@ class UserServiceTest {
     void shouldNotRemoveMissingUser() {
         assertThat(userService.removeById(999L)).isFalse();
         verify(userRepository, never()).deleteById(any());
+    }
+
+    // ---- изменение логина и почты ----
+
+    @Test
+    void shouldChangeUsernameAndEmail() {
+        CustomerUser user = TestData.customer(1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        userService.update(1L, " new_name ", "new@example.com");
+
+        assertThat(user.getUsername()).isEqualTo("new_name");
+        assertThat(user.getEmail()).isEqualTo("new@example.com");
+    }
+
+    @Test
+    void shouldAllowUserToKeepOwnUsername() {
+        CustomerUser user = TestData.customer(1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.findByUsernameIgnoreCase("customer1")).thenReturn(Optional.of(user));
+
+        userService.update(1L, "customer1", "other@example.com");
+
+        assertThat(user.getEmail()).isEqualTo("other@example.com");
+    }
+
+    @Test
+    void shouldRejectUsernameTakenByAnotherUser() {
+        when(userRepository.findById(1L)).thenReturn(Optional.of(TestData.customer(1L)));
+        when(userRepository.findByUsernameIgnoreCase("customer2")).thenReturn(Optional.of(TestData.customer(2L)));
+
+        assertThatThrownBy(() -> userService.update(1L, "customer2", "x@example.com"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Username already taken");
+    }
+
+    @Test
+    void shouldRejectEmailTakenByAnotherUser() {
+        when(userRepository.findById(1L)).thenReturn(Optional.of(TestData.customer(1L)));
+        when(userRepository.findByEmailIgnoreCase("taken@example.com")).thenReturn(Optional.of(TestData.customer(2L)));
+
+        assertThatThrownBy(() -> userService.update(1L, "customer1", "taken@example.com"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Email already registered");
+    }
+
+    @Test
+    void shouldRejectUpdateOfUnknownUser() {
+        assertThatThrownBy(() -> userService.update(99L, "name", "x@example.com"))
+                .isInstanceOf(NoSuchElementException.class);
     }
 }

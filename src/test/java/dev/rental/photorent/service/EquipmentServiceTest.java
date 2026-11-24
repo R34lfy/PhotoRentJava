@@ -4,6 +4,7 @@ import dev.rental.photorent.TestData;
 import dev.rental.photorent.model.AdminUser;
 import dev.rental.photorent.model.CustomerUser;
 import dev.rental.photorent.model.Equipment;
+import dev.rental.photorent.model.EquipmentCategory;
 import dev.rental.photorent.model.EquipmentCondition;
 import dev.rental.photorent.model.EquipmentModel;
 import dev.rental.photorent.model.EquipmentNote;
@@ -268,7 +269,79 @@ class EquipmentServiceTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
-    // удаление
+    // ---- справочники и модели ----
+
+    @Test
+    void shouldReturnAllCategories() {
+        EquipmentCategory cameras = TestData.cameraCategory();
+        when(categoryRepository.findAll()).thenReturn(List.of(cameras));
+
+        assertThat(equipmentService.getCategories()).containsExactly(cameras);
+    }
+
+    @Test
+    void shouldReturnAllModelsWhenCategoryIsNotGiven() {
+        EquipmentModel model = TestData.model(1L, "Sony", "A7 IV");
+        when(modelRepository.findAll()).thenReturn(List.of(model));
+
+        assertThat(equipmentService.getModels(null)).containsExactly(model);
+        assertThat(equipmentService.getModels(" ")).containsExactly(model);
+    }
+
+    @Test
+    void shouldNormalizeCategoryPrefixWhenFilteringModels() {
+        EquipmentModel model = TestData.model(1L, "Sony", "A7 IV");
+        when(modelRepository.findByCategorySerialPrefix("CAM")).thenReturn(List.of(model));
+
+        assertThat(equipmentService.getModels(" cam ")).containsExactly(model);
+    }
+
+    @Test
+    void shouldUpdateModelDescriptionAndRate() {
+        EquipmentModel model = TestData.model(1L, "Sony", "A7 IV");
+        when(modelRepository.findById(1L)).thenReturn(Optional.of(model));
+
+        equipmentService.updateModel(1L, "New description", BigDecimal.valueOf(60));
+
+        assertThat(model.getDescription()).isEqualTo("New description");
+        assertThat(model.getDailyRate()).isEqualByComparingTo("60");
+    }
+
+    @Test
+    void shouldRejectNegativeRateWhenUpdatingModel() {
+        assertThatThrownBy(() -> equipmentService.updateModel(1L, "desc", BigDecimal.valueOf(-5)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void shouldRejectUpdatingUnknownModel() {
+        assertThatThrownBy(() -> equipmentService.updateModel(99L, "desc", BigDecimal.TEN))
+                .isInstanceOf(NoSuchElementException.class);
+    }
+
+    @Test
+    void shouldRemoveExistingModel() {
+        when(modelRepository.existsById(1L)).thenReturn(true);
+
+        assertThat(equipmentService.removeModel(1L)).isTrue();
+        verify(modelRepository).deleteById(1L);
+    }
+
+    @Test
+    void shouldNotRemoveMissingModel() {
+        assertThat(equipmentService.removeModel(99L)).isFalse();
+        verify(modelRepository, never()).deleteById(any());
+    }
+
+    // ---- удаление ----
+
+    @Test
+    void shouldRemoveExistingEquipment() {
+        when(equipmentRepository.existsById(1L)).thenReturn(true);
+
+        assertThat(equipmentService.removeById(1L)).isTrue();
+        verify(equipmentRepository).deleteById(1L);
+    }
 
     @Test
     void shouldNotRemoveMissingEquipment() {

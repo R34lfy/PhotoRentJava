@@ -1,5 +1,6 @@
 package dev.rental.photorent.service;
 
+import dev.rental.photorent.FixedClockConfig;
 import dev.rental.photorent.TestData;
 import dev.rental.photorent.concurrent.RentalOverdueProcessor;
 import dev.rental.photorent.model.CustomerUser;
@@ -29,7 +30,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-@SpringBootTest(classes = {RentalService.class, RentalOverdueProcessor.class})
+@SpringBootTest(classes = {RentalService.class, RentalOverdueProcessor.class, FixedClockConfig.class})
 class RentalServiceTest {
 
     private static final LocalDate START = LocalDate.of(2026, 12, 1);
@@ -247,6 +248,68 @@ class RentalServiceTest {
         when(rentalRepository.findByStatus(RentalStatus.ACTIVE)).thenReturn(List.of(pastDue, notDue));
 
         int marked = rentalService.markOverdueRentals(LocalDate.of(2026, 11, 18));
+
+        assertThat(marked).isEqualTo(1);
+        assertThat(pastDue.getStatus()).isEqualTo(RentalStatus.OVERDUE);
+        assertThat(notDue.getStatus()).isEqualTo(RentalStatus.ACTIVE);
+    }
+
+    // ---- даты брони ----
+
+    @Test
+    void shouldRejectStartDateInThePast() {
+        LocalDate yesterday = FixedClockConfig.TODAY.minusDays(1);
+
+        assertThatThrownBy(() -> rentalService.bookRental(1L, 3L, yesterday, END))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("past");
+        verify(rentalRepository, never()).save(any(Rental.class));
+    }
+
+    @Test
+    void shouldAllowBookingThatStartsToday() {
+        Rental rental = rentalService.bookRental(1L, 3L, FixedClockConfig.TODAY, END);
+
+        assertThat(rental.getStartDate()).isEqualTo(FixedClockConfig.TODAY);
+    }
+
+    // ---- отмена брони ----
+
+    @Test
+    void shouldCancelBookedRental() {
+        Rental rental = storedRental(RentalStatus.BOOKED);
+
+        rentalService.cancelBooking(10L);
+
+        verify(rentalRepository).delete(rental);
+    }
+
+    @Test
+    void shouldRejectCancellingActiveRentalAndKeepIt() {
+        storedRental(RentalStatus.ACTIVE);
+
+        assertThatThrownBy(() -> rentalService.cancelBooking(10L))
+                .isInstanceOf(IllegalStateException.class);
+        verify(rentalRepository, never()).delete(any(Rental.class));
+    }
+
+    @Test
+    void shouldRejectCancellingUnknownRental() {
+        assertThatThrownBy(() -> rentalService.cancelBooking(99L))
+                .isInstanceOf(NoSuchElementException.class);
+    }
+
+    // ---- просрочка без указанной даты ----
+
+    @Test
+    void shouldUseTodayFromClockWhenDateIsNotGiven() {
+        Rental pastDue = TestData.rental(1L, camera, customer,
+                LocalDate.of(2026, 10, 1), LocalDate.of(2026, 11, 10), RentalStatus.ACTIVE);
+        Rental notDue = TestData.rental(2L, camera, customer,
+                LocalDate.of(2026, 10, 1), LocalDate.of(2026, 11, 18), RentalStatus.ACTIVE);
+        when(rentalRepository.findByStatus(RentalStatus.ACTIVE)).thenReturn(List.of(pastDue, notDue));
+
+        int marked = rentalService.markOverdueRentals(null);
 
         assertThat(marked).isEqualTo(1);
         assertThat(pastDue.getStatus()).isEqualTo(RentalStatus.OVERDUE);
