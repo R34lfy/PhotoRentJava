@@ -10,9 +10,11 @@ import dev.rental.photorent.repository.EquipmentRepository;
 import dev.rental.photorent.repository.RentalRepository;
 import dev.rental.photorent.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.LocalDate;
 import java.util.Comparator;
 import java.util.List;
@@ -22,13 +24,13 @@ import java.util.Optional;
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
-
 public class RentalService {
 
     private final RentalRepository rentalRepository;
     private final EquipmentRepository equipmentRepository;
     private final UserRepository userRepository;
     private final RentalOverdueProcessor overdueProcessor;
+    private final Clock clock;
 
     @Transactional
     public Rental bookRental(Long equipmentId, Long customerId, LocalDate startDate, LocalDate endDate) {
@@ -37,6 +39,9 @@ public class RentalService {
         }
         if (startDate.isAfter(endDate)) {
             throw new IllegalArgumentException("Start date must not be after end date");
+        }
+        if (startDate.isBefore(LocalDate.now(clock))) {
+            throw new IllegalArgumentException("Start date must not be in the past");
         }
 
         // блокируем строку техники (параллельные брони одной техники идут по очереди)
@@ -114,21 +119,41 @@ public class RentalService {
         rentalRepository.saveAndFlush(rental);
     }
 
-    // потоки ищут просроченные аренды параллельно, статус меняем уже в основном потоке
+    // потоки ищут просроченные аренды параллельно, статус меняем уже в основном потоке;
+    // если дата не указана, берём сегодняшнюю
     @Transactional
     public int markOverdueRentals(LocalDate today) {
+        LocalDate checkDate = today != null ? today : LocalDate.now(clock);
         List<Rental> overdue = overdueProcessor.findOverdueRentals(
-                rentalRepository.findByStatus(RentalStatus.ACTIVE), today);
+                rentalRepository.findByStatus(RentalStatus.ACTIVE), checkDate);
         overdue.forEach(rental -> rental.setStatus(RentalStatus.OVERDUE));
         return overdue.size();
     }
 
-    public List<Rental> getRentalsByCustomer(Long customerId) {
-        return rentalRepository.findByCustomerId(customerId);
+    // отменить можно только бронь, которую ещё не выдали (BOOKED)
+    @Transactional
+    public void cancelBooking(Long rentalId) {
+        Rental rental = getRentalOrThrow(rentalId);
+        if (rental.getStatus() != RentalStatus.BOOKED) {
+            throw new IllegalStateException(
+                    "Only BOOKED rentals can be cancelled, current status: " + rental.getStatus());
+        }
+        rentalRepository.delete(rental);
     }
 
-    public List<Rental> getActiveRentals() {
-        return rentalRepository.findByStatus(RentalStatus.ACTIVE);
+    // любые фильтры можно не указывать (null), остальные комбинируются через AND
+    public List<Rental> search(Long customerId, Long equipmentId, RentalStatus status) {
+        Specification<Rental> spec = (root, query, cb) -> cb.conjunction();
+        if (customerId != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("customer").get("id"), customerId));
+        }
+        if (equipmentId != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("equipment").get("id"), equipmentId));
+        }
+        if (status != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("status"), status));
+        }
+        return rentalRepository.findAll(spec);
     }
 
     public Optional<Rental> getById(Long id) {

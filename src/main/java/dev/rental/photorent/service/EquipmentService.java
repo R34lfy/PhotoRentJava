@@ -16,6 +16,7 @@ import dev.rental.photorent.repository.EquipmentRepository;
 import dev.rental.photorent.repository.RentalRepository;
 import dev.rental.photorent.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,7 +29,6 @@ import java.util.Optional;
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
-
 public class EquipmentService {
 
     private final EquipmentRepository equipmentRepository;
@@ -75,18 +75,6 @@ public class EquipmentService {
         return equipmentRepository.findById(id);
     }
 
-    public List<Equipment> getByCategory(String serialPrefix) {
-        return equipmentRepository.findByModelCategorySerialPrefix(serialPrefix);
-    }
-
-    public List<Equipment> searchByName(String namePart) {
-        return equipmentRepository.findByModelNameContainingIgnoreCase(namePart);
-    }
-
-    public List<Equipment> getAll() {
-        return equipmentRepository.findAll();
-    }
-
     // среди подходящих экземпляров выбираем лучший по состоянию (порядок enum: NEW лучше всех)
     public Optional<Equipment> findBestAvailableByName(String namePart) {
         return equipmentRepository
@@ -94,6 +82,65 @@ public class EquipmentService {
                 .stream()
                 .filter(Equipment::isAvailableForRental)
                 .min(Comparator.comparing(Equipment::getCondition));
+    }
+
+    public List<EquipmentCategory> getCategories() {
+        return categoryRepository.findAll();
+    }
+
+    public List<EquipmentModel> getModels(String categoryPrefix) {
+        if (categoryPrefix == null || categoryPrefix.isBlank()) {
+            return modelRepository.findAll();
+        }
+        return modelRepository.findByCategorySerialPrefix(categoryPrefix.trim().toUpperCase());
+    }
+
+    public Optional<EquipmentModel> getModelById(Long id) {
+        return modelRepository.findById(id);
+    }
+
+    @Transactional
+    public EquipmentModel updateModel(Long id, String description, BigDecimal dailyRate) {
+        if (dailyRate == null || dailyRate.signum() < 0) {
+            throw new IllegalArgumentException("Daily rate must not be negative");
+        }
+        EquipmentModel model = modelRepository.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("Equipment model not found: " + id));
+        model.setDescription(description);
+        model.setDailyRate(dailyRate);
+        return model;
+    }
+
+    @Transactional
+    public boolean removeModel(Long id) {
+        if (!modelRepository.existsById(id)) {
+            return false;
+        }
+        modelRepository.deleteById(id);
+        return true;
+    }
+
+    // любые фильтры можно не указывать (null или пустая строка), остальные комбинируются через AND
+    public List<Equipment> search(String categoryPrefix, EquipmentStatus status,
+                                  EquipmentCondition condition, String name) {
+        Specification<Equipment> spec = (root, query, cb) -> cb.conjunction();
+        if (categoryPrefix != null && !categoryPrefix.isBlank()) {
+            String prefix = categoryPrefix.trim().toUpperCase();
+            spec = spec.and((root, query, cb) ->
+                    cb.equal(root.get("model").get("category").get("serialPrefix"), prefix));
+        }
+        if (status != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("status"), status));
+        }
+        if (condition != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("condition"), condition));
+        }
+        if (name != null && !name.isBlank()) {
+            String pattern = "%" + name.trim().toLowerCase() + "%";
+            spec = spec.and((root, query, cb) ->
+                    cb.like(cb.lower(root.get("model").get("name")), pattern));
+        }
+        return equipmentRepository.findAll(spec);
     }
 
     @Transactional
@@ -145,6 +192,7 @@ public class EquipmentService {
                 previous, newCondition, reason.trim());
         noteRepository.save(new EquipmentNote(equipment, staff, text));
     }
+
     @Transactional
     public EquipmentNote addNote(Long equipmentId, Long authorId, String text) {
         if (text == null || text.isBlank()) {
