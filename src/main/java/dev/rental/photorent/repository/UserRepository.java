@@ -1,23 +1,28 @@
 package dev.rental.photorent.repository;
 
+import dev.rental.photorent.model.CustomerUser;
 import dev.rental.photorent.model.User;
 import dev.rental.photorent.model.UserRole;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
 
-public interface UserRepository {
+public interface UserRepository extends JpaRepository<User, Long> {
 
-    User add(User user);
+    Optional<User> findByUsernameIgnoreCase(String username);
 
-    Optional<User> findById(Long id);
+    Optional<User> findByEmailIgnoreCase(String email);
 
-    Optional<User> findByUsername(String username);
+    boolean existsByUsernameIgnoreCase(String username);
+
+    boolean existsByEmailIgnoreCase(String email);
 
     List<User> findByRole(UserRole role);
 
-    List<User> findAll();
-
-    boolean deleteById(Long id);
+    @Query("select c from CustomerUser c where c.id = :id")
+    Optional<CustomerUser> findCustomerById(@Param("id") Long id);
 }
 

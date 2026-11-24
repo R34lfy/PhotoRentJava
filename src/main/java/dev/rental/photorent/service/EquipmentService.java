@@ -3,122 +3,229 @@ package dev.rental.photorent.service;
 import dev.rental.photorent.model.Equipment;
 import dev.rental.photorent.model.EquipmentCategory;
 import dev.rental.photorent.model.EquipmentCondition;
+import dev.rental.photorent.model.EquipmentModel;
 import dev.rental.photorent.model.EquipmentNote;
 import dev.rental.photorent.model.EquipmentStatus;
-import dev.rental.photorent.repository.EquipmentRepository;
-import dev.rental.photorent.repository.EquipmentNoteRepository;
-
+import dev.rental.photorent.model.RentalStatus;
 import dev.rental.photorent.model.User;
-import dev.rental.photorent.model.AdminUser;
+import dev.rental.photorent.model.UserRole;
+import dev.rental.photorent.repository.EquipmentCategoryRepository;
+import dev.rental.photorent.repository.EquipmentModelRepository;
+import dev.rental.photorent.repository.EquipmentNoteRepository;
+import dev.rental.photorent.repository.EquipmentRepository;
+import dev.rental.photorent.repository.RentalRepository;
+import dev.rental.photorent.repository.UserRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-
-import java.util.List;
-import java.util.Optional;
-
-import java.time.LocalDateTime;
+import java.math.BigDecimal;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 
+@Service
+@RequiredArgsConstructor
+@Transactional(readOnly = true)
 public class EquipmentService {
 
     private final EquipmentRepository equipmentRepository;
-    private final EquipmentNoteRepository equipmentNoteRepository;
-    private final Map<EquipmentCategory, AtomicInteger> serialCounters = new ConcurrentHashMap<>();
-    private final AtomicLong noteIdCounter = new AtomicLong(0);
+    private final EquipmentModelRepository modelRepository;
+    private final EquipmentCategoryRepository categoryRepository;
+    private final EquipmentNoteRepository noteRepository;
+    private final UserRepository userRepository;
+    private final RentalRepository rentalRepository;
 
-    public EquipmentService(EquipmentRepository equipmentRepository, EquipmentNoteRepository equipmentNoteRepository) {
-        this.equipmentRepository = equipmentRepository;
-        this.equipmentNoteRepository = equipmentNoteRepository;
+    @Transactional
+    public EquipmentModel createModel(String categoryPrefix, String brand, String name,
+                                      String description, BigDecimal dailyRate) {
+        if (brand == null || brand.isBlank() || name == null || name.isBlank()) {
+            throw new IllegalArgumentException("Brand and name must not be blank");
+        }
+        if (dailyRate == null || dailyRate.signum() < 0) {
+            throw new IllegalArgumentException("Daily rate must not be negative");
+        }
+        String cleanBrand = brand.trim();
+        String cleanName = name.trim();
+
+        EquipmentCategory category = categoryRepository.findById(categoryPrefix)
+                .orElseThrow(() -> new NoSuchElementException("Category not found: " + categoryPrefix));
+        if (modelRepository.existsByBrandIgnoreCaseAndNameIgnoreCase(cleanBrand, cleanName)) {
+            throw new IllegalStateException("Model already exists: " + cleanBrand + " " + cleanName);
+        }
+        return modelRepository.save(new EquipmentModel(category, cleanBrand, cleanName, description, dailyRate));
     }
 
-    public Equipment addEquipment(Equipment equipment) {
-        if (equipment == null) {
-            throw new IllegalArgumentException("Equipment must not be null");
+    @Transactional
+    public Equipment addEquipment(Long modelId, EquipmentCondition condition) {
+        if (condition == null || condition == EquipmentCondition.DECOMMISSIONED) {
+            throw new IllegalArgumentException("New equipment cannot be decommissioned");
         }
-        return equipmentRepository.add(equipment);
+        EquipmentModel model = modelRepository.findById(modelId)
+                .orElseThrow(() -> new NoSuchElementException("Equipment model not found: " + modelId));
+
+        String serialNumber = nextSerialNumber(model.getCategory().getSerialPrefix());
+        return equipmentRepository.save(
+                new Equipment(model, serialNumber, EquipmentStatus.AVAILABLE, condition));
     }
 
     public Optional<Equipment> getById(Long id) {
         return equipmentRepository.findById(id);
     }
 
-    public List<Equipment> getByCategory(EquipmentCategory category) {
-        return equipmentRepository.findByCategory(category);
-    }
-
-    public List<Equipment> searchByName(String namePart) {
-        return equipmentRepository.findByNameContaining(namePart);
-    }
-
+    // среди подходящих экземпляров выбираем лучший по состоянию (порядок enum: NEW лучше всех)
     public Optional<Equipment> findBestAvailableByName(String namePart) {
-        return equipmentRepository.findByNameContaining(namePart).stream()
+        return equipmentRepository
+                .findByModelNameContainingIgnoreCaseAndStatus(namePart, EquipmentStatus.AVAILABLE)
+                .stream()
                 .filter(Equipment::isAvailableForRental)
                 .min(Comparator.comparing(Equipment::getCondition));
     }
 
-    public List<Equipment> getAll() {
-        return equipmentRepository.findAll();
+    public List<EquipmentCategory> getCategories() {
+        return categoryRepository.findAll();
     }
 
+    public List<EquipmentModel> getModels(String categoryPrefix) {
+        if (categoryPrefix == null || categoryPrefix.isBlank()) {
+            return modelRepository.findAll();
+        }
+        return modelRepository.findByCategorySerialPrefix(categoryPrefix.trim().toUpperCase());
+    }
+
+    public Optional<EquipmentModel> getModelById(Long id) {
+        return modelRepository.findById(id);
+    }
+
+    @Transactional
+    public EquipmentModel updateModel(Long id, String description, BigDecimal dailyRate) {
+        if (dailyRate == null || dailyRate.signum() < 0) {
+            throw new IllegalArgumentException("Daily rate must not be negative");
+        }
+        EquipmentModel model = modelRepository.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("Equipment model not found: " + id));
+        model.setDescription(description);
+        model.setDailyRate(dailyRate);
+        return model;
+    }
+
+    @Transactional
+    public boolean removeModel(Long id) {
+        if (!modelRepository.existsById(id)) {
+            return false;
+        }
+        modelRepository.deleteById(id);
+        return true;
+    }
+
+    // любые фильтры можно не указывать (null или пустая строка), остальные комбинируются через AND
+    public List<Equipment> search(String categoryPrefix, EquipmentStatus status,
+                                  EquipmentCondition condition, String name) {
+        Specification<Equipment> spec = (root, query, cb) -> cb.conjunction();
+        if (categoryPrefix != null && !categoryPrefix.isBlank()) {
+            String prefix = categoryPrefix.trim().toUpperCase();
+            spec = spec.and((root, query, cb) ->
+                    cb.equal(root.get("model").get("category").get("serialPrefix"), prefix));
+        }
+        if (status != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("status"), status));
+        }
+        if (condition != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("condition"), condition));
+        }
+        if (name != null && !name.isBlank()) {
+            String pattern = "%" + name.trim().toLowerCase() + "%";
+            spec = spec.and((root, query, cb) ->
+                    cb.like(cb.lower(root.get("model").get("name")), pattern));
+        }
+        return equipmentRepository.findAll(spec);
+    }
+
+    @Transactional
     public boolean removeById(Long id) {
-        return equipmentRepository.deleteById(id);
+        if (!equipmentRepository.existsById(id)) {
+            return false;
+        }
+        equipmentRepository.deleteById(id);
+        return true;
     }
 
-    public void updateCondition(Long equipmentId, EquipmentCondition newCondition, User staff, String reason) {
-        Equipment equipment = equipmentRepository.findById(equipmentId)
-                .orElseThrow(() -> new IllegalStateException("Equipment not found: " + equipmentId));
-
+    @Transactional
+    public void updateCondition(Long equipmentId, EquipmentCondition newCondition,
+                                Long staffId, String reason) {
+        if (newCondition == null) {
+            throw new IllegalArgumentException("New condition must be specified");
+        }
         if (reason == null || reason.isBlank()) {
             throw new IllegalArgumentException("A reason must be provided when changing equipment condition");
         }
-        if (newCondition == EquipmentCondition.DECOMMISSIONED && !(staff instanceof AdminUser)) {
-            throw new IllegalStateException("Only an administrator can mark equipment as decommissioned");
+        // блокируем строку техники (параллельная бронь и списание идут по очереди)
+        Equipment equipment = equipmentRepository.findByIdForUpdate(equipmentId)
+                .orElseThrow(() -> new NoSuchElementException("Equipment not found: " + equipmentId));
+        User staff = findStaff(staffId);
+
+        EquipmentCondition previous = equipment.getCondition();
+        if (previous == newCondition) {
+            throw new IllegalArgumentException("Equipment is already in condition " + previous);
+        }
+        if (previous == EquipmentCondition.DECOMMISSIONED) {
+            throw new IllegalStateException("Decommissioned equipment cannot be restored");
+        }
+        if (newCondition == EquipmentCondition.DECOMMISSIONED) {
+            if (staff.getRole() != UserRole.ADMIN) {
+                throw new IllegalStateException("Only an administrator can decommission equipment");
+            }
+            if (rentalRepository.existsByEquipmentIdAndStatusIn(equipmentId, RentalStatus.OPEN_STATUSES)) {
+                throw new IllegalStateException(
+                        "Cannot decommission equipment with unfinished rentals: " + equipment.getSerialNumber());
+            }
         }
 
-        EquipmentCondition previousCondition = equipment.getCondition();
         equipment.setCondition(newCondition);
-
         if (newCondition == EquipmentCondition.DECOMMISSIONED) {
             equipment.setStatus(EquipmentStatus.RETIRED);
         }
 
-        String noteText = String.format("Condition changed from %s to %s. Reason: %s",
-                previousCondition, newCondition, reason);
-        EquipmentNote note = new EquipmentNote(noteIdCounter.incrementAndGet(), equipment, staff, noteText, LocalDateTime.now());
-        equipmentNoteRepository.add(note);
+        String text = String.format("Condition changed from %s to %s. Reason: %s",
+                previous, newCondition, reason.trim());
+        noteRepository.save(new EquipmentNote(equipment, staff, text));
     }
 
-    public EquipmentNote addNote(EquipmentNote note) {
-        if (note == null) {
-            throw new IllegalArgumentException("Note must not be null");
+    @Transactional
+    public EquipmentNote addNote(Long equipmentId, Long authorId, String text) {
+        if (text == null || text.isBlank()) {
+            throw new IllegalArgumentException("Note text must not be blank");
         }
-        return equipmentNoteRepository.add(note);
+        Equipment equipment = findEquipment(equipmentId);
+        User author = findStaff(authorId);
+        return noteRepository.save(new EquipmentNote(equipment, author, text.trim()));
     }
 
     public List<EquipmentNote> getNotesFor(Long equipmentId) {
-        return equipmentNoteRepository.findByEquipmentId(equipmentId);
+        return noteRepository.findByEquipmentIdOrderByCreatedAtDesc(equipmentId);
     }
 
-    public String generateSerialNumber(EquipmentCategory category) {
-        String prefix = switch (category) {
-            case CAMERA -> "CAM";
-            case LENS -> "LEN";
-            case LIGHTING -> "LIG";
-            case TRIPOD -> "TRI";
-            case AUDIO -> "AUD";
-            case BATTERY -> "BAT";
-            case SDCARD -> "SDC";
-        };
+    private String nextSerialNumber(String prefix) {
+        categoryRepository.incrementSerialCounter(prefix);
+        int number = categoryRepository.findSerialCounter(prefix)
+                .orElseThrow(() -> new NoSuchElementException("Category not found: " + prefix));
+        return String.format("%s-%05d", prefix, number);
+    }
 
-        int nextNumber = serialCounters
-                .computeIfAbsent(category, key -> new AtomicInteger(0))
-                .incrementAndGet();
-        return prefix + "-" + String.format("%05d", nextNumber);
+    private Equipment findEquipment(Long id) {
+        return equipmentRepository.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("Equipment not found: " + id));
+    }
+
+    private User findStaff(Long id) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("User not found: " + id));
+        if (user.getRole() == UserRole.CUSTOMER) {
+            throw new IllegalStateException("Only staff can change equipment records");
+        }
+        return user;
     }
 }
 

@@ -1,15 +1,14 @@
 package dev.rental.photorent.repository;
 
 import dev.rental.photorent.model.EquipmentNote;
+import org.springframework.data.jpa.repository.EntityGraph;
+import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
 
-public interface EquipmentNoteRepository {
+public interface EquipmentNoteRepository extends JpaRepository<EquipmentNote, Long> {
 
-    EquipmentNote add(EquipmentNote note);
-
-    List<EquipmentNote> findByEquipmentId(Long equipmentId);
-
-    boolean deleteById(Long id);
+    @EntityGraph(attributePaths = {"equipment", "author"})
+    List<EquipmentNote> findByEquipmentIdOrderByCreatedAtDesc(Long equipmentId);
 }
 

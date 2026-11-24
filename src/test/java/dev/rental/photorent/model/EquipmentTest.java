@@ -1,8 +1,7 @@
 package dev.rental.photorent.model;
 
+import dev.rental.photorent.TestData;
 import org.junit.jupiter.api.Test;
-
-import java.math.BigDecimal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -10,56 +9,68 @@ class EquipmentTest {
 
     @Test
     void shouldBeAvailableWhenStatusAvailableAndConditionGood() {
-        Equipment camera = createCamera(EquipmentStatus.AVAILABLE, EquipmentCondition.GOOD);
-
-        assertThat(camera.isAvailableForRental()).isTrue();
+        assertThat(equipment(EquipmentStatus.AVAILABLE, EquipmentCondition.GOOD).isAvailableForRental()).isTrue();
     }
 
     @Test
-    void shouldNotBeAvailableWhenStatusIsRented() {
-        Equipment camera = createCamera(EquipmentStatus.RENTED, EquipmentCondition.GOOD);
-
-        assertThat(camera.isAvailableForRental()).isFalse();
+    void shouldNotBeAvailableWhenRented() {
+        assertThat(equipment(EquipmentStatus.RENTED, EquipmentCondition.GOOD).isAvailableForRental()).isFalse();
     }
 
     @Test
-    void shouldNotBeAvailableWhenConditionNeedsRepair() {
-        Equipment camera = createCamera(EquipmentStatus.AVAILABLE, EquipmentCondition.NEEDS_REPAIR);
-
-        assertThat(camera.isAvailableForRental()).isFalse();
+    void shouldNotBeAvailableWhenInMaintenance() {
+        assertThat(equipment(EquipmentStatus.MAINTENANCE, EquipmentCondition.GOOD).isAvailableForRental()).isFalse();
     }
 
     @Test
-    void shouldNotBeAvailableWhenConditionIsDecommissioned() {
-        Equipment camera = createCamera(EquipmentStatus.AVAILABLE, EquipmentCondition.DECOMMISSIONED);
-
-        assertThat(camera.isAvailableForRental()).isFalse();
+    void shouldNotBeAvailableWhenNeedsRepair() {
+        assertThat(equipment(EquipmentStatus.AVAILABLE, EquipmentCondition.NEEDS_REPAIR).isAvailableForRental()).isFalse();
     }
 
     @Test
-    void shouldBeBookableRegardlessOfCurrentStatus() {
-        Equipment camera = createCamera(EquipmentStatus.RENTED, EquipmentCondition.GOOD);
-
-        assertThat(camera.isUsableForRental()).isTrue();
+    void shouldNotBeAvailableWhenDecommissioned() {
+        assertThat(equipment(EquipmentStatus.AVAILABLE, EquipmentCondition.DECOMMISSIONED).isAvailableForRental()).isFalse();
     }
 
     @Test
-    void shouldNotBeBookableWhenNeedsRepair() {
-        Equipment camera = createCamera(EquipmentStatus.AVAILABLE, EquipmentCondition.NEEDS_REPAIR);
-
-        assertThat(camera.isUsableForRental()).isFalse();
+    void shouldBeUsableRegardlessOfCurrentStatus() {
+        assertThat(equipment(EquipmentStatus.RENTED, EquipmentCondition.GOOD).isUsable()).isTrue();
     }
 
     @Test
-    void shouldNotBeBookableWhenDecommissioned() {
-        Equipment camera = createCamera(EquipmentStatus.AVAILABLE, EquipmentCondition.DECOMMISSIONED);
-
-        assertThat(camera.isUsableForRental()).isFalse();
+    void shouldNotBeUsableWhenNeedsRepair() {
+        assertThat(equipment(EquipmentStatus.AVAILABLE, EquipmentCondition.NEEDS_REPAIR).isUsable()).isFalse();
     }
 
-    private Equipment createCamera(EquipmentStatus status, EquipmentCondition condition) {
-        return new Equipment(1L, "Sony A7 IV", "Sony", "Full-frame mirrorless",
-                EquipmentCategory.CAMERA, "CAM-00001", BigDecimal.valueOf(50), status, condition);
+    @Test
+    void shouldNotBeUsableWhenDecommissioned() {
+        assertThat(equipment(EquipmentStatus.AVAILABLE, EquipmentCondition.DECOMMISSIONED).isUsable()).isFalse();
+    }
+
+    @Test
+    void shouldBeEqualWhenIdsMatch() {
+        Equipment first = TestData.equipment(1L, EquipmentStatus.AVAILABLE, EquipmentCondition.NEW);
+        Equipment second = TestData.equipment(1L, EquipmentStatus.RENTED, EquipmentCondition.WORN);
+
+        assertThat(first).isEqualTo(second);
+    }
+
+    @Test
+    void shouldNotBeEqualWhenIdsDiffer() {
+        assertThat(TestData.equipment(1L, EquipmentStatus.AVAILABLE, EquipmentCondition.NEW))
+                .isNotEqualTo(TestData.equipment(2L, EquipmentStatus.AVAILABLE, EquipmentCondition.NEW));
+    }
+
+    @Test
+    void shouldNotBeEqualWhenIdIsNotAssignedYet() {
+        EquipmentModel model = TestData.model(1L, "Sony", "A7 IV");
+        Equipment first = new Equipment(model, "CAM-00001", EquipmentStatus.AVAILABLE, EquipmentCondition.NEW);
+        Equipment second = new Equipment(model, "CAM-00001", EquipmentStatus.AVAILABLE, EquipmentCondition.NEW);
+
+        assertThat(first).isNotEqualTo(second);
+    }
+
+    private Equipment equipment(EquipmentStatus status, EquipmentCondition condition) {
+        return TestData.equipment(1L, status, condition);
     }
 }
-

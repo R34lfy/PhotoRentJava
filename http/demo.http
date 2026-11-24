@@ -1,0 +1,231 @@
+@host = http://localhost:8080
+
+### 0. Справочник категорий (создан скриптом schema.sql)
+< {%
+    client.global.set("sfx", Math.random().toString(36).slice(2, 7));
+    // даты считаем от сегодняшнего дня, чтобы файл не устаревал
+    const f = n => {
+        const x = new Date(Date.now() + n * 864e5);
+        return x.getFullYear() + "-" + String(x.getMonth() + 1).padStart(2, "0") + "-" + String(x.getDate()).padStart(2, "0");
+    };
+    client.global.set("dPast", f(-1));
+    client.global.set("dStart", f(10));
+    client.global.set("dEnd", f(14));
+    client.global.set("dOverlapStart", f(12));
+    client.global.set("dOverlapEnd", f(17));
+    client.global.set("dExtend", f(17));
+    client.global.set("dCheck", f(40));
+    client.global.set("dFutureStart", f(60));
+    client.global.set("dFutureEnd", f(62));
+%}
+GET {{host}}/api/categories
+
+
+### ---------- CREATE ----------
+
+### 1.1 Администратор
+POST {{host}}/api/users
+Content-Type: application/json
+
+{"username": "admin_{{sfx}}", "email": "admin_{{sfx}}@demo.com", "password": "secret", "role": "ADMIN"}
+
+> {% client.global.set("adminId", response.body.id); %}
+
+### 1.2 Менеджер
+POST {{host}}/api/users
+Content-Type: application/json
+
+{"username": "manager_{{sfx}}", "email": "manager_{{sfx}}@demo.com", "password": "secret", "role": "MANAGER"}
+
+> {% client.global.set("managerId", response.body.id); %}
+
+### 1.3 Клиент
+POST {{host}}/api/users
+Content-Type: application/json
+
+{"username": "john_{{sfx}}", "email": "john_{{sfx}}@demo.com", "password": "secret", "role": "CUSTOMER"}
+
+> {% client.global.set("customerId", response.body.id); %}
+
+### 1.4 Повторная регистрация того же логина -> 409
+POST {{host}}/api/users
+Content-Type: application/json
+
+{"username": "john_{{sfx}}", "email": "other_{{sfx}}@demo.com", "password": "secret", "role": "CUSTOMER"}
+
+### 1.5 Невалидное тело (плохой email) -> 400
+POST {{host}}/api/users
+Content-Type: application/json
+
+{"username": "x", "email": "not-an-email", "password": "secret", "role": "CUSTOMER"}
+
+### 2.0 Тариф с лишними знаками после запятой -> 400
+POST {{host}}/api/models
+Content-Type: application/json
+
+{"categoryPrefix": "CAM", "brand": "Sony", "name": "Bad-{{sfx}}", "dailyRate": 10.123}
+
+### 2.1 Модель техники
+POST {{host}}/api/models
+Content-Type: application/json
+
+{"categoryPrefix": "CAM", "brand": "Sony", "name": "A7-{{sfx}}", "description": "Full-frame", "dailyRate": 50}
+
+> {% client.global.set("modelId", response.body.id); %}
+
+### 2.2 Три экземпляра этой модели (серийные номера выдаются автоматически: CAM-xxxxx)
+POST {{host}}/api/equipment
+Content-Type: application/json
+
+{"modelId": {{modelId}}, "condition": "NEW"}
+
+> {% client.global.set("eq1", response.body.id); %}
+
+###
+POST {{host}}/api/equipment
+Content-Type: application/json
+
+{"modelId": {{modelId}}, "condition": "WORN"}
+
+> {% client.global.set("eq2", response.body.id); %}
+
+###
+POST {{host}}/api/equipment
+Content-Type: application/json
+
+{"modelId": {{modelId}}, "condition": "GOOD"}
+
+> {% client.global.set("eq3", response.body.id); %}
+
+
+### ---------- READ + ФИЛЬТРЫ ----------
+
+### 3.1 Все экземпляры категории CAM, которые свободны
+GET {{host}}/api/equipment?categoryPrefix=CAM&status=AVAILABLE
+
+### 3.2 Поиск по названию модели + состояние
+GET {{host}}/api/equipment?name=A7-{{sfx}}&condition=NEW
+
+### 3.3 Лучший по состоянию свободный экземпляр (ожидаем NEW)
+GET {{host}}/api/equipment/best?name=A7-{{sfx}}
+
+### 3.4 Пользователи с ролью CUSTOMER
+GET {{host}}/api/users?role=CUSTOMER
+
+### 3.5 Модели категории CAM
+GET {{host}}/api/models?categoryPrefix=CAM
+
+### 3.6 Невалидный фильтр -> 400
+GET {{host}}/api/equipment?status=BROKEN
+
+### 3.7 Несуществующий id -> 404
+GET {{host}}/api/equipment/999999
+
+
+### ---------- UPDATE ----------
+
+### 4.1 Изменить тариф и описание модели
+PUT {{host}}/api/models/{{modelId}}
+Content-Type: application/json
+
+{"description": "Full-frame mirrorless", "dailyRate": 60}
+
+### 4.2 Изменить логин клиента
+PUT {{host}}/api/users/{{customerId}}
+Content-Type: application/json
+
+{"username": "john_doe_{{sfx}}", "email": "john_{{sfx}}@demo.com"}
+
+### 4.3 Сменить состояние экземпляра (создаёт заметку в журнале)
+PATCH {{host}}/api/equipment/{{eq2}}/condition
+Content-Type: application/json
+
+{"condition": "GOOD", "staffId": {{managerId}}, "reason": "Cleaned and tested"}
+
+### 4.4 Журнал заметок этого экземпляра
+GET {{host}}/api/equipment/{{eq2}}/notes
+
+### 4.5 Клиент не может менять состояние техники -> 409
+PATCH {{host}}/api/equipment/{{eq2}}/condition
+Content-Type: application/json
+
+{"condition": "WORN", "staffId": {{customerId}}, "reason": "I am a customer"}
+
+
+### ---------- АРЕНДА (бизнес-логика) ----------
+
+### 5.1 Бронь
+POST {{host}}/api/rentals
+Content-Type: application/json
+
+{"equipmentId": {{eq1}}, "customerId": {{customerId}}, "startDate": "{{dStart}}", "endDate": "{{dEnd}}"}
+
+> {% client.global.set("rentalId", response.body.id); %}
+
+### 5.2 Та же техника на пересекающиеся даты -> 409
+POST {{host}}/api/rentals
+Content-Type: application/json
+
+{"equipmentId": {{eq1}}, "customerId": {{customerId}}, "startDate": "{{dOverlapStart}}", "endDate": "{{dOverlapEnd}}"}
+
+### 5.2a Начало брони в прошлом -> 400
+POST {{host}}/api/rentals
+Content-Type: application/json
+
+{"equipmentId": {{eq1}}, "customerId": {{customerId}}, "startDate": "{{dPast}}", "endDate": "{{dStart}}"}
+
+### 5.3 Выдача (BOOKED -> ACTIVE, техника получает статус RENTED)
+POST {{host}}/api/rentals/{{rentalId}}/issue
+
+### 5.4 Продление
+PATCH {{host}}/api/rentals/{{rentalId}}/extend
+Content-Type: application/json
+
+{"newEndDate": "{{dExtend}}"}
+
+### 5.5 Нельзя списать технику с незавершённой арендой -> 409
+PATCH {{host}}/api/equipment/{{eq1}}/condition
+Content-Type: application/json
+
+{"condition": "DECOMMISSIONED", "staffId": {{adminId}}, "reason": "Broken"}
+
+### 5.6 Фильтр аренд: активные аренды этого клиента
+GET {{host}}/api/rentals?customerId={{customerId}}&status=ACTIVE
+
+### 5.7 Многопоточная проверка просрочек.
+POST {{host}}/api/rentals/overdue-check?today={{dCheck}}
+
+### 5.8 Статус аренды стал OVERDUE
+GET {{host}}/api/rentals/{{rentalId}}
+
+### 5.9 Возврат (OVERDUE -> RETURNED, техника снова AVAILABLE)
+POST {{host}}/api/rentals/{{rentalId}}/return
+
+
+### ---------- DELETE ----------
+
+### 6.1 Теперь списание проходит (админ, аренд нет): статус RETIRED
+PATCH {{host}}/api/equipment/{{eq1}}/condition
+Content-Type: application/json
+
+{"condition": "DECOMMISSIONED", "staffId": {{adminId}}, "reason": "Broken"}
+
+### 6.2 Бронь на будущее и её отмена (DELETE -> 204)
+POST {{host}}/api/rentals
+Content-Type: application/json
+
+{"equipmentId": {{eq2}}, "customerId": {{customerId}}, "startDate": "{{dFutureStart}}", "endDate": "{{dFutureEnd}}"}
+
+> {% client.global.set("rentalId2", response.body.id); %}
+
+###
+DELETE {{host}}/api/rentals/{{rentalId2}}
+
+### 6.3 Удаление экземпляра без связанных данных -> 204
+DELETE {{host}}/api/equipment/{{eq3}}
+
+### 6.4 То же ещё раз -> 404
+DELETE {{host}}/api/equipment/{{eq3}}
+
+### 6.5 Удаление экземпляра, на который ссылаются аренды и заметки -> 409 (ограничение FK из schema.sql)
+DELETE {{host}}/api/equipment/{{eq2}}

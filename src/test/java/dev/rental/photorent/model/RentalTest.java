@@ -1,77 +1,67 @@
 package dev.rental.photorent.model;
 
+import dev.rental.photorent.TestData;
 import org.junit.jupiter.api.Test;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class RentalTest {
 
-    private final Equipment camera = new Equipment(1L, "Sony A7 IV", "Sony", "Full-frame mirrorless",
-            EquipmentCategory.CAMERA, "CAM-00001", BigDecimal.valueOf(50),
-            EquipmentStatus.AVAILABLE, EquipmentCondition.NEW);
-    private final CustomerUser customer = new CustomerUser(1L, "john_doe", "john@example.com");
+    private final Equipment camera = TestData.equipment(1L, EquipmentStatus.RENTED, EquipmentCondition.GOOD);
+    private final CustomerUser customer = TestData.customer(1L);
 
     @Test
     void shouldDetectOverlapWhenPeriodsIntersect() {
-        Rental rental = new Rental(1L, camera, customer,
-                LocalDate.of(2026, 10, 5), LocalDate.of(2026, 10, 15), RentalStatus.BOOKED);
+        Rental rental = rental(LocalDate.of(2026, 10, 5), LocalDate.of(2026, 10, 15), RentalStatus.BOOKED);
 
-        boolean overlaps = rental.overlapsWith(LocalDate.of(2026, 10, 10), LocalDate.of(2026, 10, 20));
-
-        assertThat(overlaps).isTrue();
+        assertThat(rental.overlapsWith(LocalDate.of(2026, 10, 10), LocalDate.of(2026, 10, 20))).isTrue();
     }
 
     @Test
-    void shouldDetectNoOverlapWhenPeriodsAreSeparate() {
-        Rental rental = new Rental(1L, camera, customer,
-                LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 5), RentalStatus.BOOKED);
+    void shouldDetectOverlapWhenOtherPeriodIsInside() {
+        Rental rental = rental(LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 30), RentalStatus.BOOKED);
 
-        boolean overlaps = rental.overlapsWith(LocalDate.of(2026, 10, 6), LocalDate.of(2026, 10, 10));
-
-        assertThat(overlaps).isFalse();
+        assertThat(rental.overlapsWith(LocalDate.of(2026, 10, 10), LocalDate.of(2026, 10, 12))).isTrue();
     }
 
     @Test
     void shouldDetectOverlapWhenPeriodsTouchOnSameDay() {
-        Rental rental = new Rental(1L, camera, customer,
-                LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 5), RentalStatus.BOOKED);
+        Rental rental = rental(LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 5), RentalStatus.BOOKED);
 
-        boolean overlaps = rental.overlapsWith(LocalDate.of(2026, 10, 5), LocalDate.of(2026, 10, 10));
+        assertThat(rental.overlapsWith(LocalDate.of(2026, 10, 5), LocalDate.of(2026, 10, 10))).isTrue();
+    }
 
-        assertThat(overlaps).isTrue();
+    @Test
+    void shouldNotOverlapWhenPeriodsAreSeparate() {
+        Rental rental = rental(LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 5), RentalStatus.BOOKED);
+
+        assertThat(rental.overlapsWith(LocalDate.of(2026, 10, 6), LocalDate.of(2026, 10, 10))).isFalse();
     }
 
     @Test
     void shouldBeOverdueWhenActiveAndPastEndDate() {
-        Rental rental = new Rental(1L, camera, customer,
-                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 10), RentalStatus.ACTIVE);
+        Rental rental = rental(LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 10), RentalStatus.ACTIVE);
 
-        boolean overdue = rental.isOverdue(LocalDate.of(2026, 9, 20));
-
-        assertThat(overdue).isTrue();
+        assertThat(rental.isOverdue(LocalDate.of(2026, 9, 20))).isTrue();
     }
 
     @Test
-    void shouldNotBeOverdueWhenStillWithinPeriod() {
-        Rental rental = new Rental(1L, camera, customer,
-                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30), RentalStatus.ACTIVE);
+    void shouldNotBeOverdueOnTheLastDay() {
+        Rental rental = rental(LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 10), RentalStatus.ACTIVE);
 
-        boolean overdue = rental.isOverdue(LocalDate.of(2026, 9, 20));
-
-        assertThat(overdue).isFalse();
+        assertThat(rental.isOverdue(LocalDate.of(2026, 9, 10))).isFalse();
     }
 
     @Test
     void shouldNotBeOverdueWhenNotActive() {
-        Rental rental = new Rental(1L, camera, customer,
-                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 10), RentalStatus.BOOKED);
+        Rental rental = rental(LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 10), RentalStatus.BOOKED);
 
-        boolean overdue = rental.isOverdue(LocalDate.of(2026, 9, 20));
+        assertThat(rental.isOverdue(LocalDate.of(2026, 9, 20))).isFalse();
+    }
 
-        assertThat(overdue).isFalse();
+    private Rental rental(LocalDate start, LocalDate end, RentalStatus status) {
+        return TestData.rental(1L, camera, customer, start, end, status);
     }
 }
-

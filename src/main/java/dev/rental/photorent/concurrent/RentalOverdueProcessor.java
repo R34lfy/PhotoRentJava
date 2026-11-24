@@ -1,74 +1,81 @@
 package dev.rental.photorent.concurrent;
 
 import dev.rental.photorent.model.Rental;
-import dev.rental.photorent.model.RentalStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 
+@Component
 public class RentalOverdueProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(RentalOverdueProcessor.class);
 
     private final int threadCount;
 
-    public RentalOverdueProcessor(int threadCount) {
+    public RentalOverdueProcessor(@Value("${rental.overdue.threads:4}") int threadCount) {
         if (threadCount < 1) {
             throw new IllegalArgumentException("threadCount must be at least 1");
         }
         this.threadCount = threadCount;
     }
 
-    public void processOverdueRentals(List<Rental> activeRentals, LocalDate today) {
+    public List<Rental> findOverdueRentals(List<Rental> activeRentals, LocalDate today) {
         if (activeRentals.isEmpty()) {
             log.info("No active rentals to process");
-            return;
+            return List.of();
         }
 
-        ThreadFactory namedThreadFactory = new NamedThreadFactory("OverdueChecker");
-        ExecutorService executorService = Executors.newFixedThreadPool(threadCount, namedThreadFactory);
-
-        List<List<Rental>> chunks = splitIntoChunks(activeRentals, threadCount);
-        CountDownLatch latch = new CountDownLatch(chunks.size());
-
-        for (List<Rental> chunk : chunks) {
-            executorService.submit(() -> {
-                try {
-                    processChunk(chunk, today);
-                } finally {
-                    latch.countDown();
-                }
-            });
+        Queue<Rental> overdue = new ConcurrentLinkedQueue<>();
+        ExecutorService executorService =
+                Executors.newFixedThreadPool(threadCount, new NamedThreadFactory("OverdueChecker"));
+        try {
+            List<List<Rental>> chunks = splitIntoChunks(activeRentals, threadCount);
+            CountDownLatch latch = new CountDownLatch(chunks.size());
+            for (List<Rental> chunk : chunks) {
+                executorService.submit(() -> {
+                    try {
+                        checkChunk(chunk, today, overdue);
+                    } finally {
+                        latch.countDown();
+                    }
+                });
+            }
+            awaitCompletion(latch);
+        } finally {
+            executorService.shutdown();
         }
-
-        awaitCompletion(latch);
-        executorService.shutdown();
+        return new ArrayList<>(overdue);
     }
 
-    private void processChunk(List<Rental> chunk, LocalDate today) {
+    private void checkChunk(List<Rental> chunk, LocalDate today, Queue<Rental> overdue) {
         String threadName = Thread.currentThread().getName();
-        log.info("[{}] Started processing chunk of {} rentals", threadName, chunk.size());
+        log.info("[{}] Started checking chunk of {} rentals", threadName, chunk.size());
 
         for (Rental rental : chunk) {
             if (rental.isOverdue(today)) {
-                rental.setStatus(RentalStatus.OVERDUE);
-                log.info("[{}] Rental {} marked as OVERDUE (endDate={})",
+                overdue.add(rental);
+                log.info("[{}] Rental {} is overdue (endDate={})",
                         threadName, rental.getId(), rental.getEndDate());
             }
         }
 
-        log.info("[{}] Finished processing chunk", threadName);
+        log.info("[{}] Finished checking chunk", threadName);
     }
 
     private List<List<Rental>> splitIntoChunks(List<Rental> rentals, int chunkCount) {
-        List<List<Rental>> chunks = new java.util.ArrayList<>();
+        List<List<Rental>> chunks = new ArrayList<>();
         int size = rentals.size();
         int actualChunkCount = Math.min(chunkCount, size);
         int baseSize = size / actualChunkCount;
@@ -76,8 +83,7 @@ public class RentalOverdueProcessor {
 
         int start = 0;
         for (int i = 0; i < actualChunkCount; i++) {
-            int currentChunkSize = baseSize + (i < remainder ? 1 : 0);
-            int end = start + currentChunkSize;
+            int end = start + baseSize + (i < remainder ? 1 : 0);
             chunks.add(rentals.subList(start, end));
             start = end;
         }

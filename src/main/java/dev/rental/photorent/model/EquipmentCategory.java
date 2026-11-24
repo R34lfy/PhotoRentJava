@@ -1,12 +1,33 @@
 package dev.rental.photorent.model;
 
-public enum EquipmentCategory {
-    CAMERA,
-    LENS,
-    LIGHTING,
-    TRIPOD,
-    AUDIO,
-    BATTERY,
-    SDCARD
-}
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
+@Entity
+@Table(name = "equipment_category")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+
+public class EquipmentCategory {
+
+    @Id
+    @Column(name = "serial_prefix", length = 3, updatable = false)
+    private String serialPrefix;
+
+    @Column(nullable = false, length = 30)
+    private String name;
+
+    // меняется только запросом incrementSerialCounter в репозитории
+    @Column(name = "last_serial_number", nullable = false)
+    private int lastSerialNumber;
+
+    public EquipmentCategory(String serialPrefix, String name) {
+        this.serialPrefix = serialPrefix;
+        this.name = name;
+    }
+}
